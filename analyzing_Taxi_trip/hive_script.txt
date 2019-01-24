@@ -1,0 +1,137 @@
+--Step-1
+
+create a directory in HDFS, hadoop fs -mkdir /user/taxi_trips, and upload data into this directory (remove headers from the file) 
+
+--Step-2 create an external table to read trips raw data
+
+create external table trips_raw
+(
+VendorID int,
+tpep_pickup_datetime timestamp,
+tpep_dropoff_datetime timestamp,
+passenger_count int,
+trip_distance double,
+pickup_longitude string,
+pickup_latitude string,
+RatecodeID string,
+store_and_fwd_flag string,
+dropoff_longitude string,
+dropoff_latitude string,
+payment_type string,
+fare_amount double,
+extra double,
+mta_tax double,
+tip_amount double,
+tolls_amount double,
+improvement_surcharge double,
+total_amount double
+)
+ ROW FORMAT DELIMITED FIELDS TERMINATED BY ','  location '/user/taxi_trips/';
+
+--Step-3 create a database (i will call it "dwh")
+
+create database dwh;
+
+--Step-4: creating date dimension table
+
+a. creating table
+
+create table dim_time
+(time_key int,
+ hour string,
+ business_timing string
+ );
+
+b. loading data
+
+insert into table dim_time
+values
+(0,'12am','Late Night'),
+(1,'1am','Late Night'),
+(2,'2am','Late Night'),
+(3,'3am','Early Morning'),
+(4,'4am','Early Morning'),
+(5,'5am','Early Morning'),
+(6,'6am','Early Morning'),
+(7,'7am','AM Peak'),
+(8,'8am','AM Peak'),
+(9,'9am','AM Peak'),
+(10,'10am','Mid Morning'),
+(11,'11am','Mid Morning'),
+(12,'12pm','Lunch'),
+(13,'1pm','Lunch'),
+(14,'2pm','Mid Afternoon'),
+(15,'3pm','Mid Afternoon'),
+(16,'4pm','Mid Afternoon'),
+(17,'5pm','Evening'),
+(18,'6pm','Evening'),
+(19,'7pm','PM Peak'),
+(20,'8pm','PM Peak'),
+(21,'9pm','PM Peak'),
+(22,'10pm','Night'),
+(23,'11pm','Night');
+
+--Step-5: 
+
+given a date_key (YYYYMMDD) derive date attributes like day_name,quarter_name,month_name,week_number etc. For this you can write a program (in any language you like Python/Java/JavaScript/Shell-script etc) that should generate a CSV file, which contains all date attributes which will be needed for your date dimension table, when passed start date (date_key) and end date (date_key). I have attached sample CSV file (dim_date_201601_woh.csv.zip).
+
+create external table dim_date
+(
+date_key int,
+year_month_number string,
+quarter_number string,
+month_number string,
+year_number string,
+year_month_abbreviation string,
+year_quarter string,
+quarter_name string,
+month_name string,
+day_name string
+)
+ ROW FORMAT DELIMITED FIELDS TERMINATED BY ','  location '/user/sample_data/dim_date/';
+
+--Step-6:  Creating fact table and loading data into it.
+a. creating table:
+
+create table trip_pickup_facts
+(
+vendor_id int,
+date_key int,
+time_key int,
+pickup_time timestamp,
+payment_type string,
+fare_amount decimal,
+extra decimal,
+mta_tax decimal,
+tip_amount decimal,
+tolls_amount decimal,
+improvement_surcharge decimal,
+total_amount decimal
+)
+stored as orc;
+
+b. loading data
+insert overwrite table trip_pickup_facts
+select
+vendorid,
+from_unixtime(unix_timestamp(tpep_pickup_datetime), 'yyyyMMdd') as date_key,
+hour(tpep_pickup_datetime) as time_key,
+tpep_pickup_datetime,
+payment_type,
+fare_amount,
+extra,
+mta_tax,
+tip_amount,
+tolls_amount,
+improvement_surcharge,
+total_amount
+from trips_raw;
+
+Sample Query:
+select dd.day_name,dt.business_timing,tpf.vendor_id, count(tpf.vendor_id) as trips_count, sum(tpf.total_amount) as revenue_earned
+
+from trip_pickup_facts tpf
+join dim_date dd on dd.date_key=tpf.date_key
+join dim_time dt on dt.time_key=tpf.time_key
+group by dd.day_name,dt.business_timing,tpf.vendor_id;
+
